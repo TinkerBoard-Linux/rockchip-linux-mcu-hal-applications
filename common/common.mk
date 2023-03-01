@@ -8,6 +8,8 @@ COMMON_PATH=$(HAL_PATH)/applications/common
 
 INCLUDES += \
 -I"$(COMMON_PATH)" \
+-I"$(COMMON_PATH)/rpmsg_cmd" \
 
 SRC_DIRS += \
     $(COMMON_PATH) \
+    $(COMMON_PATH)/rpmsg_cmd \
