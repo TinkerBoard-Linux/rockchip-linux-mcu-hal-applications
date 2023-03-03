@@ -9,8 +9,10 @@ AUDIO_ALGORITHM_PATH=$(HAL_PATH)/applications/vehicle
 INCLUDES += \
 -I"$(AUDIO_ALGORITHM_PATH)" \
 -I"$(AUDIO_ALGORITHM_PATH)/include" \
+-I"$(AUDIO_ALGORITHM_PATH)/algorithm/ECNR"
 
 SRC_DIRS += \
     $(AUDIO_ALGORITHM_PATH) \
+    $(AUDIO_ALGORITHM_PATH)/algorithm/ECNR
 
-LDFLAGS += \
+LDFLAGS += -L$(AUDIO_ALGORITHM_PATH)/lib/ -laec_bf_process -lrkaudio_common
