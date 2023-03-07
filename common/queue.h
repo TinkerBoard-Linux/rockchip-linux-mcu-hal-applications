@@ -13,10 +13,9 @@
  * Queue list structure
  */
 
-struct queue_data_t
-{
+struct queue_data_t {
     uint32_t type;
-    void*    data; // output
+    void *data;    // output
     uint32_t size;
 };
 typedef struct queue_data_t qdata_t;                  /**< Type for queue data. */
@@ -24,9 +23,8 @@ typedef struct queue_data_t qdata_t;                  /**< Type for queue data. 
 /*
  * Queue node structure
  */
-struct queue_node_t
-{
-    list_t  list;
+struct queue_node_t {
+    list_t list;
     qdata_t qdat;
 };
 typedef struct queue_node_t queue_t;                  /**< Type for queue node. */
@@ -52,6 +50,13 @@ void queue_destory(queue_t *pq);
  * data: data of pq
  */
 void queue_push(queue_t *pq, qdata_t *data);
+/*
+ * push a queue urgent
+ *
+ * pq:   queue to be push
+ * data: data of pq
+ */
+void queue_push_urgent(queue_t *pq, qdata_t *data);
 
 /*
  * pop a queue
@@ -65,14 +70,14 @@ void queue_pop(queue_t *pq);
  *
  * pq: queue pointer
  */
-qdata_t* queue_front(queue_t *pq);
+qdata_t *queue_front(queue_t *pq);
 
 /*
  * get the tail element of pq
  *
  * pq: queue pointer
  */
-qdata_t* queue_back(queue_t *pq);
+qdata_t *queue_back(queue_t *pq);
 
 /*
  * check queue is empty

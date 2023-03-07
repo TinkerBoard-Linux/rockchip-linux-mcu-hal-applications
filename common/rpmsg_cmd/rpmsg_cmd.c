@@ -13,155 +13,175 @@
 #include "middleware_conf.h"
 #include "rpmsg_cmd.h"
 
-#if defined(CPU0)
-#define MASTER_EPT EPT_M1R0_SYSCMD
-#elif defined(CPU2)
-#define MASTER_EPT EPT_M1R2_SYSCMD
-#elif defined(CPU3)
-#define MASTER_EPT EPT_M1R3_SYSCMD
+void *rpmsg_cmd_table_callback_find(uint32_t cmd, struct rpmsg_cmd_table_t *table, uint32_t size)
+{
+    uint32_t i;
+
+    for (i = 0; i < size; i++) {
+        if (table[i].cmd == cmd) {
+            return (void *)(table[i].callback);
+        }
+    }
+
+    return NULL;
+}
+
+int rpmsg_cmd_send(struct rpmsg_cmd_data_t *p_rpmsg_data, uint32_t timeout)
+{
+    int32_t ret;
+
+    HAL_ASSERT(p_rpmsg_data);
+    HAL_ASSERT(p_rpmsg_data->handle);
+
+    struct rpmsg_cmd_head_t *head = &p_rpmsg_data->head;
+    struct rpmsg_ept_handle_t *handle = p_rpmsg_data->handle;
+
+#ifdef PRIMARY_CPU
+    ret = rpmsg_lite_send(handle->instance, handle->ept,
+                          EPT_M2R_ADDR(handle->endpoint),
+                          head, sizeof(struct rpmsg_cmd_head_t),
+                          timeout);
 #else
-#error "error: Undefined CPU id!"
+    ret = rpmsg_lite_send(handle->instance, handle->ept,
+                          EPT_R2M_ADDR(handle->endpoint),
+                          head, sizeof(struct rpmsg_cmd_head_t),
+                          timeout);
 #endif
 
-#define REMOTE_EPT EPT_M2R_ADDR(MASTER_EPT)
+    return ret;
+}
 
-static int32_t rpmsg_cmd_direct(void *priv, void *addr);
-
-static struct rpmsg_cmd_info_t rpmsg_info;
-
-/*
- * RPMsg ept callback
- *
- */
-static int32_t remote_ept_cb(void *payload, uint32_t payload_len, uint32_t src, void *priv)
+static int32_t rpmsg_ept_cb(void *payload, uint32_t payload_len, uint32_t src, void *priv)
 {
-    rpmsg_fmt_t *rpmsg_fmt = (rpmsg_fmt_t *)payload;
-    struct rpmsg_cmd_info_t *info = (struct rpmsg_cmd_info_t *)priv;
+    struct rpmsg_ept_handle_t *handle = (struct rpmsg_ept_handle_t *)priv;
+    struct rpmsg_cmd_head_t *head = (struct rpmsg_cmd_head_t *)payload;
 
-    HAL_ASSERT(src == MASTER_EPT);
+    HAL_ASSERT(payload_len == sizeof(struct rpmsg_cmd_head_t));
 
-    switch (rpmsg_fmt->cmd) {
-    case RPMSG_TYPE_DIRECT:
-        rpmsg_cmd_direct(priv, rpmsg_fmt->addr);
-        break;
+    if (head->type == RPMSG_TYPE_DIRECT) {
+        void (*callback)(void *param);
+        callback = rpmsg_cmd_table_callback_find(head->cmd, handle->cmd_table, handle->cmd_counter);
+        if (callback) {
+            struct rpmsg_cmd_data_t rpmsg_data;
 
-    case RPMSG_TYPE_WORK:
-    {
-        /* push rpmsg_fmt->addr to queue */
-        queue_t *rq = &info->rq;
-        qdata_t qdat;
-        qdat.size = payload_len - sizeof(uint32_t);      //size = payload_len - cmd size
-        qdat.data = malloc(qdat.size);
-        memcpy(qdat.data, &rpmsg_fmt->addr, qdat.size);
-        queue_push(rq, &qdat);
-        break;
-    }
+            memcpy(&rpmsg_data.head, payload, sizeof(struct rpmsg_cmd_data_t));
+            rpmsg_data.handle = handle;
+            rpmsg_data.endpoint = src;
 
-    case RPMSG_TYPE_QUERY:
-    {
-        /* pop data from queue */
-        queue_t *wq = &info->wq;
-
-        if (!queue_empty(wq)) {
-            qdata_t *w_qdat = queue_front(wq);
-
-            rpmsg_fmt_t rpmsg_data;
-            rpmsg_data.cmd = rpmsg_fmt->cmd;
-            rpmsg_data.addr = w_qdat->data;     //rpmsg_fmt->addr;
-
-            if (w_qdat->data) {
-                rpmsg_lite_send(info->instance, info->ept, MASTER_EPT, &rpmsg_data, sizeof(rpmsg_fmt_t), RL_BLOCK);
-                free(w_qdat->data);
-            }
-            queue_pop(wq);
+            callback(&rpmsg_data);
         }
-        break;
-    }
+    } else if (head->type == RPMSG_TYPE_URGENT) {
+        struct rpmsg_cmd_data_t *p_rpmsg_data = malloc(sizeof(struct rpmsg_cmd_data_t));
+        HAL_ASSERT(p_rpmsg_data);
+        memcpy(&p_rpmsg_data->head, payload, sizeof(struct rpmsg_cmd_data_t));
+        p_rpmsg_data->handle = handle;
+        p_rpmsg_data->endpoint = src;
 
-    default:
-        HAL_ASSERT(0);
-        break;
+        /* push queue */
+        qdata_t qdata;
+        qdata.data = p_rpmsg_data;
+        qdata.size = sizeof(struct rpmsg_cmd_data_t);
+        queue_push(handle->mq, &qdata);
+    } else {
+        struct rpmsg_cmd_data_t *p_rpmsg_data = malloc(sizeof(struct rpmsg_cmd_data_t));
+        HAL_ASSERT(p_rpmsg_data);
+        memcpy(&p_rpmsg_data->head, payload, sizeof(struct rpmsg_cmd_data_t));
+        p_rpmsg_data->handle = handle;
+        p_rpmsg_data->endpoint = src;
+
+        /* push queue */
+        qdata_t qdata;
+        qdata.data = p_rpmsg_data;
+        qdata.size = sizeof(struct rpmsg_cmd_data_t);
+        queue_push_urgent(handle->mq, &qdata);
     }
 
     return RL_RELEASE;
 }
 
-/*
- * Initial rpmsg ept & command info
- *
- */
-int rpmsg_cmd_init(void *param)
+int rpmsg_cmd_ept_do_work(void *arg)
 {
-    struct rpmsg_cmd_info_t *info = &rpmsg_info;
-    uint32_t master_id = MASTER_ID;
-    uint32_t remote_id = HAL_CPU_TOPOLOGY_GetCurrentCpuId();
+    struct rpmsg_ept_handle_t *handle = (struct rpmsg_ept_handle_t *)arg;
 
-    memset(info, 0, sizeof(struct rpmsg_cmd_info_t));
+    if (!queue_empty(handle->mq)) {
+        qdata_t *p_qdata = queue_front(handle->mq);
+        struct rpmsg_cmd_data_t *p_rpmsg_data = (struct rpmsg_cmd_data_t *)p_qdata->data;
+        struct rpmsg_cmd_head_t *head = &p_rpmsg_data->head;
+        void (*callback)(void *param) = rpmsg_cmd_table_callback_find(head->cmd, handle->cmd_table, handle->cmd_counter);
 
-    info->instance = rpmsg_remote_get_instance(master_id, remote_id);
-    info->ept = rpmsg_lite_create_ept(info->instance, REMOTE_EPT, remote_ept_cb, info);
+        if (callback) {
+            callback(p_rpmsg_data);
+        }
 
-    queue_init(&info->rq);
-    queue_init(&info->wq);
+        free(p_qdata->data);
+
+        queue_pop(handle->mq);
+    }
+
+    if (!queue_empty(handle->mq)) {
+        return HAL_BUSY;
+    }
 
     return HAL_OK;
 }
 
-/*
- * RPMsg direct command process
- */
-static int32_t rpmsg_cmd_direct(void *priv, void *param)
+void rpmsg_cmd_ept_init(struct rpmsg_ept_handle_t *handle,
+                        uint32_t master_id, uint32_t remote_id, uint32_t endpoint,
+                        struct rpmsg_cmd_table_t *cmd_table, uint32_t cmd_counter,
+                        int (*work_fun)(void *arg), void *arg)
 {
-    rpmsg_cmd_t *info = (rpmsg_cmd_t *)priv;
-    uint32_t *cmd = (uint32_t *)param;
+    HAL_ASSERT(handle);
 
-    rpmsg_fmt_t rpmsg_data;
+    handle->master_id = master_id;
+    handle->remote_id = remote_id;
+    handle->endpoint = endpoint;
+    handle->cmd_table = cmd_table;
+    handle->cmd_counter = cmd_counter;
 
-    rpmsg_data.cmd = RPMSG_TYPE_DIRECT;
-    rpmsg_data.addr = param;
+#ifdef PRIMARY_CPU
+    handle->instance = rpmsg_master_get_instance(handle->master_id, handle->remote_id);
+#else
+    handle->instance = rpmsg_remote_get_instance(handle->master_id, handle->remote_id);
+#endif
+    HAL_ASSERT(handle->instance);
 
-    switch (*cmd) {
-    case RPMSG_CMD_GET_CPU_USAGE:
-    {
-        cpuusage_t *usage = (cpuusage_t *)param;
-        usage->cmd = RPMSG_ACK_GET_CPU_USAGE;
-        usage->data = HAL_GetCPUUsage();
-        break;
-    }
-    default:
-        break;
-    }
-    rpmsg_lite_send(info->instance, info->ept, MASTER_EPT, &rpmsg_data, sizeof(rpmsg_fmt_t), RL_BLOCK);
+    handle->ept = rpmsg_lite_create_ept(handle->instance, handle->endpoint, rpmsg_ept_cb, handle);
+    HAL_ASSERT(handle->ept);
 
-    return HAL_OK;
+    handle->work_fun = work_fun;
+    handle->arg = arg;
+
+    handle->mq = (queue_t *)malloc(sizeof(queue_t));
+    HAL_ASSERT(handle->mq);
+
+    queue_init(handle->mq);
 }
 
-/*
- * RPMsg work(pop queue) command process
- */
-int rpmsg_cmd_process(void *param)
+void rpmsg_cmd_ept_work_init(struct rpmsg_ept_handle_t *handle,
+                             int (*work_fun)(void *arg), void *arg)
 {
-    int ret = HAL_OK;
-    struct rpmsg_cmd_info_t *info = &rpmsg_info;
-    queue_t *rq = &info->rq;
+    HAL_ASSERT(handle);
+    HAL_ASSERT(handle->master_id == MASTER_ID);
+    HAL_ASSERT(handle->remote_id != MASTER_ID);
+    HAL_ASSERT(handle->remote_id <= REMOTE_ID_3);
 
-    if (!queue_empty(rq)) {
-        qdata_t *r_qdat = queue_front(rq);
-        HAL_ASSERT(r_qdat->data);
+#ifdef PRIMARY_CPU
+    handle->instance = rpmsg_master_get_instance(handle->master_id, handle->remote_id);
+#else
+    handle->instance = rpmsg_remote_get_instance(handle->master_id, handle->remote_id);
+#endif
+    HAL_ASSERT(handle->instance);
 
-        struct rpmsg_cmd_fmt_t *msg = (struct rpmsg_cmd_fmt_t *)r_qdat->data;
-        switch (msg->cmd) {
-        default:
-            break;
-        }
+    handle->ept = rpmsg_lite_create_ept(handle->instance, handle->endpoint, rpmsg_ept_cb, handle);
+    HAL_ASSERT(handle->ept);
 
-        if (r_qdat->data) {
-            free(r_qdat->data);
-        }
-        queue_pop(rq);
-    }
+    handle->work_fun = work_fun;
+    handle->arg = arg;
 
-    return HAL_OK;
+    handle->mq = (queue_t *)malloc(sizeof(queue_t));
+    HAL_ASSERT(handle->mq);
+
+    queue_init(handle->mq);
 }
 
 #endif
