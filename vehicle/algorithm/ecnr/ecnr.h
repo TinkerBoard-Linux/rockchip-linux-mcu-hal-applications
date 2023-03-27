@@ -3,8 +3,13 @@
  * Copyright (c) 2023 Rockchip Electronics Co., Ltd.
  */
 
-#ifndef __REMOTE_H__
-#define __REMOTE_H__
+#ifndef __ECNR_H__
+#define __ECNR_H__
+
+#include "hal_conf.h"
+#include "hal_base.h"
+
+#ifdef HAL_USING_ECNR_APP
 
 enum
 {
@@ -13,5 +18,8 @@ enum
     ECNR_PROCESS,
 };
 
+void ecnr_ept_cb(void *param);
+
 #endif
 
+#endif

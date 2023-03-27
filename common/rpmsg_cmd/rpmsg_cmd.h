@@ -11,16 +11,19 @@
 
 #ifdef HAL_USING_RPMSG_CMD
 
+#include "queue.h"
 #include "middleware_conf.h"
 
 /* RPMsg cmd callback */
-struct rpmsg_cmd_table_t {
+struct rpmsg_cmd_table_t
+{
     uint32_t cmd;
     void (*callback)(void *param);
 };
 
 /* RPMsg cmd handle */
-struct rpmsg_ept_handle_t {
+struct rpmsg_ept_handle_t
+{
     uint32_t master_id;
     uint32_t remote_id;
 
@@ -37,7 +40,8 @@ struct rpmsg_ept_handle_t {
 };
 
 /* RPMSG cmd head format */
-struct rpmsg_cmd_head_t {
+struct rpmsg_cmd_head_t
+{
     uint32_t type;
     uint32_t cmd;
     void *priv;
@@ -45,7 +49,8 @@ struct rpmsg_cmd_head_t {
 };
 
 /* RPMSG cmd data format */
-struct rpmsg_cmd_data_t {
+struct rpmsg_cmd_data_t
+{
     struct rpmsg_cmd_head_t head;
     struct rpmsg_ept_handle_t *handle;
     uint32_t endpoint;
@@ -65,6 +70,8 @@ struct rpmsg_cmd_data_t {
 
 #define RPMSG_CMD_GET_CPU_USAGE ((1UL << 1) + 0)
 #define RPMSG_ACK_GET_CPU_USAGE ((1UL << 1) + 1)
+#define RPMSG_CMD_GET_ECN_USAGE ((2UL << 1) + 0)
+#define RPMSG_ACK_GET_ECN_USAGE ((2UL << 1) + 1)
 
 /* RPMsg CMD API Functions */
 void rpmsg_cmd_ept_init(struct rpmsg_ept_handle_t *handle,

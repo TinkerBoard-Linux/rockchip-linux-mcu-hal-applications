@@ -6,6 +6,11 @@
 #ifndef __SKV_H__
 #define __SKV_H__
 
+#include "hal_conf.h"
+#include "hal_base.h"
+
+#ifdef HAL_USING_ECNR_APP
+
 #define INFO_RIGHT 1                // Succeed initialize SKV preprocessor
 #define INFO_PARAM_ERROR 2          // Cann't support the parameter of audio that you input
 #define INFO_EXCEEDDATE_ERROR 3     // Exceed the limited date
@@ -171,14 +176,16 @@ typedef struct _RTSkvParam
 
 typedef struct _SkvFrameParam
 {
-    int samplebits;
-    int samplerate;
-    int src_channels;
-    int ref_channels;
+    int bits;
+    int rate;
 
+    int reserve;
+    int period_size;
     int in_channels;
     int out_channels;
+    int src_channels;
+    int ref_channels;
 } SkvFrameParam;
 
 #endif
-
+#endif
