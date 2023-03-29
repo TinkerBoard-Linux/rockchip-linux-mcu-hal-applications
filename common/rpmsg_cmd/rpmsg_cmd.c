@@ -81,7 +81,7 @@ static int32_t rpmsg_ept_cb(void *payload, uint32_t payload_len, uint32_t src, v
         qdata_t qdata;
         qdata.data = p_rpmsg_data;
         qdata.size = sizeof(struct rpmsg_cmd_data_t);
-        queue_push(handle->mq, &qdata);
+        queue_push_urgent(handle->mq, &qdata);
     } else {
         struct rpmsg_cmd_data_t *p_rpmsg_data = malloc(sizeof(struct rpmsg_cmd_data_t));
         HAL_ASSERT(p_rpmsg_data);
@@ -93,7 +93,7 @@ static int32_t rpmsg_ept_cb(void *payload, uint32_t payload_len, uint32_t src, v
         qdata_t qdata;
         qdata.data = p_rpmsg_data;
         qdata.size = sizeof(struct rpmsg_cmd_data_t);
-        queue_push_urgent(handle->mq, &qdata);
+        queue_push(handle->mq, &qdata);        
     }
 
     return RL_RELEASE;
